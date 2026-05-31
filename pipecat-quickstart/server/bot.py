@@ -98,26 +98,27 @@ def generate_ics(summary, start_iso, end_iso=None, description="", location="", 
     # 环境变量检查
     if qq_email and auth_code:
         try:
-            msg = MIMEMultipart()
+            # 使用alternative类型，支持内嵌正文
+            msg = MIMEMultipart("alternative")
             msg["From"] = qq_email
             msg["To"] = qq_email
             msg["Subject"] = f"📅 新日程：{summary}"
 
-            body = MIMEText(
-                f"你的语音日历助手已为你创建日程：\n\n"
-                f"标题：{summary}\n"
-                f"时间：{dt_start.strftime('%Y年%m月%d日 %H:%M')}\n\n"
-                f"点击附件即可添加到手机日历。",
-                "plain", "utf-8"
-            )
-            msg.attach(body)
+            # ① 普通文本正文
+            text_body = f"你的语音日历助手已为你创建日程：\n\n标题：{summary}\n时间：{dt_start.strftime('%Y年%m月%d日 %H:%M')}\n\n点击下方「添加到日历」即可导入日程。"
+            msg.attach(MIMEText(text_body, "plain", "utf-8"))
 
-            # 挂载ICS附件（修正变量名）
+            # ② 关键：内嵌text/calendar正文（让邮箱识别为日程邀请）
+            ics_body = MIMEText(ics_content, "calendar", "utf-8")
+            ics_body.replace_header("Content-Type", 'text/calendar; method=REQUEST; charset="utf-8"')
+            msg.attach(ics_body)
+
+            # ③ 同时附上ICS文件作为备份（可选）
             with open(filepath, "rb") as f:
-                part = MIMEBase("text", "calendar", charset="utf-8")
+                part = MIMEBase("application", "octet-stream")
                 part.set_payload(f.read())
             encoders.encode_base64(part)
-            filename_attach = os.path.basename(filepath)  # 变量名修正
+            filename_attach = os.path.basename(filepath)
             part.add_header(
                 "Content-Disposition",
                 "attachment",
@@ -129,7 +130,7 @@ def generate_ics(summary, start_iso, end_iso=None, description="", location="", 
             with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
                 server.login(qq_email, auth_code)
                 server.sendmail(qq_email, qq_email, msg.as_string())
-            logger.info(f"📧 邮件已发送至 {qq_email}")
+            logger.info(f"📧 邮件已发送至 {qq_email}，手机端可一键添加到日历")
 
         except Exception as e:
             logger.warning(f"❌ 邮件发送失败：{str(e)}")
