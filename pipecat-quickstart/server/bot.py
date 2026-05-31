@@ -61,7 +61,15 @@ def generate_ics(summary, start_iso, end_iso=None, description="", location="", 
     # 处理时间
     dt_start = datetime.fromisoformat(start_iso).replace(tzinfo=TIMEZONE)
     dt_end = datetime.fromisoformat(end_iso).replace(tzinfo=TIMEZONE) if end_iso else dt_start + timedelta(minutes=duration_minutes)
-
+    current_year = datetime.now().year
+    now = datetime.now(TIMEZONE)
+    # 先修正年份
+    dt_start = dt_start.replace(year=current_year)
+    dt_end = dt_end.replace(year=current_year)
+    # 如果修正后时间已过去，自动+1年（适配年底说次年日期）
+    if dt_start < now:
+        dt_start = dt_start.replace(year=current_year + 1)
+        dt_end = dt_end.replace(year=current_year + 1)
     fmt = "%Y%m%dT%H%M%SZ"
     stamp = datetime.utcnow().strftime(fmt)
     start_str = dt_start.astimezone(ZoneInfo("UTC")).strftime(fmt)
