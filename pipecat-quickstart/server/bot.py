@@ -15,7 +15,15 @@ Run the bot using::
 """
 
 import os
-
+# 5.31 add
+import json
+import uuid
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+#
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -40,7 +48,66 @@ from pipecat.services.deepgram.stt import DeepgramSTTService,LiveOptions
 from pipecat.services.openai.llm import OpenAILLMService
 load_dotenv(override=True)
 
+TIMEZONE = ZoneInfo("Asia/Shanghai")
+ICS_OUTPUT_DIR = "./calendar_events"
+os.makedirs(ICS_OUTPUT_DIR, exist_ok=True)
 
+def generate_ics(summary, start_iso, end_iso=None, description="", location="", duration_minutes=60):
+    dt_start = datetime.fromisoformat(start_iso).replace(tzinfo=TIMEZONE)
+    dt_end = datetime.fromisoformat(end_iso).replace(tzinfo=TIMEZONE) if end_iso else dt_start + timedelta(minutes=duration_minutes)
+
+    fmt = "%Y%m%dT%H%M%SZ"
+    stamp = datetime.utcnow().strftime(fmt)
+    start_str = dt_start.astimezone(ZoneInfo("UTC")).strftime(fmt)
+    end_str = dt_end.astimezone(ZoneInfo("UTC")).strftime(fmt)
+
+    ics_content = "\r\n".join([
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//VoiceCalendar//PipecatBot//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        "BEGIN:VEVENT",
+        f"UID:{uuid.uuid4()}",
+        f"DTSTAMP:{stamp}",
+        f"DTSTART:{start_str}",
+        f"DTEND:{end_str}",
+        f"SUMMARY:{summary}",
+        f"DESCRIPTION:{description}",
+        f"LOCATION:{location}",
+        "END:VEVENT",
+        "END:VCALENDAR",
+        "",
+    ])
+
+    filename = f"{dt_start.strftime('%Y%m%d_%H%M')}_{summary[:20]}.ics"
+    filepath = os.path.join(ICS_OUTPUT_DIR, filename)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(ics_content)
+    logger.info(f"✅ .ics 生成：{filepath}")
+    return os.path.abspath(filepath)
+
+# 替换你原来的 CALENDAR_TOOLS 定义
+CALENDAR_TOOLS = ToolsSchema(
+    standard_tools=[
+        FunctionSchema(
+            name="create_calendar_event",
+            description="当用户要添加日历事件、设置提醒、创建会议或安排日程时调用此工具。",
+            properties={
+                "summary": {"type": "string", "description": "事件标题"},
+                "start_iso": {
+                    "type": "string",
+                    "description": f"开始时间 ISO 格式，如 '2025-06-01T15:00:00'。当前时间参考：{datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%dT%H:%M:%S')}"
+                },
+                "end_iso": {"type": "string", "description": "结束时间（可选）"},
+                "duration_minutes": {"type": "integer", "description": "持续分钟数，默认60", "default": 60},
+                "description": {"type": "string", "description": "备注（可选）"},
+                "location": {"type": "string", "description": "地点（可选）"},
+            },
+            required=["summary", "start_iso"],
+        )
+    ]
+)
 async def run_bot(transport: BaseTransport):
     """Main bot logic."""
     logger.info("Starting bot")
@@ -68,12 +135,15 @@ async def run_bot(transport: BaseTransport):
             {
                 "role": "system",
                 "content": (
-                    "你是一个语音日历助手。用户说的话会经过语音识别转成文字发给你，"
-                    "你的回复最终会被朗读出来，所以请用简洁自然的口语回答，"
-                    "不要使用 emoji、bullet point、markdown 格式或任何无法朗读的符号。"
+                    "你是一个语音日历助手，帮助用户管理日程。"
+                    "请用简洁自然的口语回答，不要使用 emoji、markdown 或无法朗读的符号。\n\n"
+                    "当用户想添加、创建日历事件或安排日程时，调用 create_calendar_event 工具。"
+                    "调用成功后告知用户：.ics 文件已生成，在程序目录的 calendar_events 文件夹中，双击可导入苹果日历。\n\n"
+                    f"当前时间：{datetime.now(TIMEZONE).strftime('%Y年%m月%d日 %H:%M')}，时区：Asia/Shanghai。"
                 ),
             }
-        ]
+        ],
+        tools=CALENDAR_TOOLS,
     )
 
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
@@ -82,6 +152,26 @@ async def run_bot(transport: BaseTransport):
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )
+
+    async def handle_create_calendar_event(params):
+        arguments = params.arguments
+        logger.info(f"🔧 Tool call: create_calendar_event({arguments})")
+        try:
+            filepath = generate_ics(
+                summary=arguments["summary"],
+                start_iso=arguments["start_iso"],
+                end_iso=arguments.get("end_iso"),
+                description=arguments.get("description", ""),
+                location=arguments.get("location", ""),
+                duration_minutes=arguments.get("duration_minutes", 60),
+            )
+            result = {"success": True, "filepath": filepath, "summary": arguments["summary"]}
+        except Exception as e:
+            result = {"success": False, "error": str(e)}
+
+        await params.result_callback(result)
+
+    llm.register_function("create_calendar_event", handle_create_calendar_event)
 
     # Pipeline：STT → LLM（无 TTS，LLM 文本回复通过 transport 输出）
     # 注意：没有 TTS 时，transport.output() 只传输文本帧，不会有语音输出
