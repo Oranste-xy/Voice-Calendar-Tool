@@ -1,0 +1,23 @@
+[
+  {
+    "uid": "f3234f21-38af-4475-8f71-71d59a8f9638",
+    "summary": "在家里面睡觉",
+    "start_iso": "2026-06-02T10:00:00",
+    "end_iso": null,
+    "reminder_minutes": 0
+  },
+  {
+    "uid": "b13c653d-533e-4d6e-8dba-b3cf3131119c",
+    "summary": "去动物园玩",
+    "start_iso": "2023-06-03T14:00:00",
+    "end_iso": "2023-06-03T16:00:00",
+    "reminder_minutes": 30
+  },
+  {
+    "uid": "1f070a5f-5128-40f1-a75a-858a8c277acf",
+    "summary": "跑步",
+    "start_iso": "2026-06-04T08:00:00",
+    "end_iso": null,
+    "reminder_minutes": 30
+  }
+]
