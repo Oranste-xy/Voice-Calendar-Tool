@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pipecat-ai[cartesia,deepgram,openai,runner,silero,webrtc,whisper]",
     "pipecatcloud",
+    "tzdata>=2026.2",
 ]
 
 [dependency-groups]

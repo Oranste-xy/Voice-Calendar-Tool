@@ -13,13 +13,18 @@ Run the bot using::
 
     uv run bot.py
 """
-
+import subprocess
 import os
 # 5.31 add
 import json
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
 #
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -53,6 +58,7 @@ ICS_OUTPUT_DIR = "./calendar_events"
 os.makedirs(ICS_OUTPUT_DIR, exist_ok=True)
 
 def generate_ics(summary, start_iso, end_iso=None, description="", location="", duration_minutes=60):
+    # 处理时间
     dt_start = datetime.fromisoformat(start_iso).replace(tzinfo=TIMEZONE)
     dt_end = datetime.fromisoformat(end_iso).replace(tzinfo=TIMEZONE) if end_iso else dt_start + timedelta(minutes=duration_minutes)
 
@@ -60,7 +66,7 @@ def generate_ics(summary, start_iso, end_iso=None, description="", location="", 
     stamp = datetime.utcnow().strftime(fmt)
     start_str = dt_start.astimezone(ZoneInfo("UTC")).strftime(fmt)
     end_str = dt_end.astimezone(ZoneInfo("UTC")).strftime(fmt)
-
+    # 生成ics内容
     ics_content = "\r\n".join([
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
@@ -79,13 +85,59 @@ def generate_ics(summary, start_iso, end_iso=None, description="", location="", 
         "END:VCALENDAR",
         "",
     ])
-
+    # 写入ics文件
     filename = f"{dt_start.strftime('%Y%m%d_%H%M')}_{summary[:20]}.ics"
     filepath = os.path.join(ICS_OUTPUT_DIR, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(ics_content)
     logger.info(f"✅ .ics 生成：{filepath}")
+    # 生成 .ics 文件之后，自动发送邮件给用户
+    qq_email = os.getenv("QQ_EMAIL")
+    auth_code = os.getenv("QQ_EMAIL_AUTH_CODE")
+
+    # 环境变量检查
+    if qq_email and auth_code:
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = qq_email
+            msg["To"] = qq_email
+            msg["Subject"] = f"📅 新日程：{summary}"
+
+            body = MIMEText(
+                f"你的语音日历助手已为你创建日程：\n\n"
+                f"标题：{summary}\n"
+                f"时间：{dt_start.strftime('%Y年%m月%d日 %H:%M')}\n\n"
+                f"点击附件即可添加到手机日历。",
+                "plain", "utf-8"
+            )
+            msg.attach(body)
+
+            # 挂载ICS附件（修正变量名）
+            with open(filepath, "rb") as f:
+                part = MIMEBase("text", "calendar", charset="utf-8")
+                part.set_payload(f.read())
+            encoders.encode_base64(part)
+            filename_attach = os.path.basename(filepath)  # 变量名修正
+            part.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=("utf-8", "", filename_attach)
+            )
+            msg.attach(part)
+
+            # 发送邮件
+            with smtplib.SMTP_SSL("smtp.qq.com", 465) as server:
+                server.login(qq_email, auth_code)
+                server.sendmail(qq_email, qq_email, msg.as_string())
+            logger.info(f"📧 邮件已发送至 {qq_email}")
+
+        except Exception as e:
+            logger.warning(f"❌ 邮件发送失败：{str(e)}")
+    else:
+        logger.info("ℹ️ 未配置QQ邮箱环境变量，跳过邮件发送")
+
     return os.path.abspath(filepath)
+    
 
 # 替换你原来的 CALENDAR_TOOLS 定义
 CALENDAR_TOOLS = ToolsSchema(
@@ -182,8 +234,8 @@ async def run_bot(transport: BaseTransport):
             user_aggregator,
             llm,
             # tts,  ← 后续加入 TTS 时取消注释，同时在这里插入 tts 实例
-            transport.output(),
             assistant_aggregator,
+            transport.output(),  
         ]
     )
 
