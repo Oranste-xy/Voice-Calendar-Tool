@@ -35,7 +35,7 @@ from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
 #from pipecat.services.whisper.stt import WhisperSTTService
-from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService,LiveOptions
 #from pipecat.services.openai import OpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 load_dotenv(override=True)
@@ -45,9 +45,13 @@ async def run_bot(transport: BaseTransport):
     """Main bot logic."""
     logger.info("Starting bot")
 
-    # 1. STT：本地 Whisper（首次运行会自动下载模型，约几百 MB）
+    # 1. STT：这里示例接入了 Deepgram 的 STT 服务，支持中文识别。
     #stt = WhisperSTTService(model="small")
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        live_options=LiveOptions(language="zh",
+            model="nova-2",)
+    )   #暂时不支持中英文混用，该版本以支持中文为MVP、可以简易识别中文中携带的party等简单英文词汇，如果想要以英文语音为主，删除live_options参数即可
     # 2. LLM：GLM-4-Flash（OpenAI 兼容接口）
     llm = OpenAILLMService(
         api_key=os.getenv("GLM_API_KEY"),
