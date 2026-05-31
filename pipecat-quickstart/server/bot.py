@@ -57,7 +57,7 @@ TIMEZONE = ZoneInfo("Asia/Shanghai")
 ICS_OUTPUT_DIR = "./calendar_events"
 os.makedirs(ICS_OUTPUT_DIR, exist_ok=True)
 
-def generate_ics(summary, start_iso, end_iso=None, description="", location="", duration_minutes=60):
+def generate_ics(summary, start_iso, end_iso=None, description="", location="", duration_minutes=60, reminder_minutes=0):
     # 处理时间
     dt_start = datetime.fromisoformat(start_iso).replace(tzinfo=TIMEZONE)
     dt_end = datetime.fromisoformat(end_iso).replace(tzinfo=TIMEZONE) if end_iso else dt_start + timedelta(minutes=duration_minutes)
@@ -89,6 +89,14 @@ def generate_ics(summary, start_iso, end_iso=None, description="", location="", 
         f"SUMMARY:{summary}",
         f"DESCRIPTION:{description}",
         f"LOCATION:{location}",
+        # 下面是新增提醒区块
+        *([
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            f"TRIGGER:-PT{reminder_minutes}M",
+            "DESCRIPTION:日程提醒",
+            "END:VALARM",
+        ] if reminder_minutes > 0 else []),
         "END:VEVENT",
         "END:VCALENDAR",
         "",
@@ -164,6 +172,12 @@ CALENDAR_TOOLS = ToolsSchema(
                 "duration_minutes": {"type": "integer", "description": "持续分钟数，默认60", "default": 60},
                 "description": {"type": "string", "description": "备注（可选）"},
                 "location": {"type": "string", "description": "地点（可选）"},
+                # 新增：提醒时长参数
+                "reminder_minutes": {
+                    "type": "integer",
+                    "description": "日程提前提醒分钟数，无提醒则传0。例如：提前1小时传60，提前30分钟传30",
+                    "default": 0
+                },    
             },
             required=["summary", "start_iso"],
         )
@@ -225,6 +239,7 @@ async def run_bot(transport: BaseTransport):
                 description=arguments.get("description", ""),
                 location=arguments.get("location", ""),
                 duration_minutes=arguments.get("duration_minutes", 60),
+                reminder_minutes=arguments.get("reminder_minutes", 0),
             )
             result = {"success": True, "filepath": filepath, "summary": arguments["summary"]}
         except Exception as e:
